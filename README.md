@@ -29,6 +29,14 @@ Copy-Item apps/api/.env.example apps/api/.env
 Copy-Item apps/web/.env.example apps/web/.env
 ```
 
+`PAGESPEED_API_KEY` is optional, but recommended. Without it, Google PageSpeed Insights uses a shared no-key quota that can be exhausted quickly.
+
+Add it to `apps/api/.env`:
+
+```env
+PAGESPEED_API_KEY=your_google_pagespeed_api_key
+```
+
 ### 3. Run the backend
 
 ```powershell

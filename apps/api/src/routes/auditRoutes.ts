@@ -92,6 +92,7 @@ auditRouter.post('/scan', async (req, res) => {
       },
       detectedPages: scan.detectedPages,
       pages: scan.pages,
+      performanceResults: scan.performanceResults,
       items: summary.items,
       overallScore: summary.overallScore,
       performanceScore: summary.performanceScore,

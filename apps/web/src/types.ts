@@ -55,6 +55,25 @@ export interface ScanProgress {
   updatedAt: string;
 }
 
+export type PerformanceStrategy = 'mobile' | 'desktop';
+
+export interface PerformanceResult {
+  url: string;
+  strategy: PerformanceStrategy;
+  performanceScore: number | null;
+  accessibilityScore: number | null;
+  bestPracticesScore: number | null;
+  seoScore: number | null;
+  firstContentfulPaint: string;
+  largestContentfulPaint: string;
+  totalBlockingTime: string;
+  cumulativeLayoutShift: string;
+  speedIndex: string;
+  finalScreenshot: string;
+  source: 'pagespeed-insights';
+  errorMessage?: string;
+}
+
 export interface DemoAudit {
   id: string;
   storeUrl: string;
@@ -66,6 +85,7 @@ export interface DemoAudit {
   performanceScore: number;
   detectedPages: DetectedPage[];
   pages: DemoAuditPage[];
+  performanceResults: PerformanceResult[];
   items: DemoAuditItem[];
   updatedAt: string;
 }

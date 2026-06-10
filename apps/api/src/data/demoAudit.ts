@@ -41,6 +41,7 @@ export function createDemoAudit(storeUrl = 'https://example.com'): DemoAudit {
     performanceScore: baselineItems.performanceScore,
     detectedPages: [],
     pages: [],
+    performanceResults: [],
     items: baselineItems.items,
     updatedAt: new Date().toISOString(),
   };

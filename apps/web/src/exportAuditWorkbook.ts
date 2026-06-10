@@ -367,6 +367,132 @@ function itemPriorityValue(item: DemoAuditItem) {
   return priorityLabels.includes(item.priorityLabel) ? item.priorityLabel : 'Medium';
 }
 
+function averagePageSpeedScore(audit: DemoAudit): number | null {
+  const scores = audit.performanceResults
+    .map((result) => result.performanceScore)
+    .filter((score): score is number => typeof score === 'number');
+
+  if (scores.length === 0) {
+    return null;
+  }
+
+  return Math.round((scores.reduce((sum, score) => sum + score, 0) / scores.length) * 10) / 10;
+}
+
+function scoreLabel(score: number): string {
+  if (score >= 90) return 'Excellent';
+  if (score >= 75) return 'Great';
+  if (score >= 50) return 'Good';
+  if (score >= 25) return 'Fair';
+  return 'Poor';
+}
+
+function drawSpeedGaugeDataUrl(score: number, title = 'PageSpeed Score'): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = 900;
+  canvas.height = 620;
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    return '';
+  }
+
+  const centerX = 450;
+  const centerY = 360;
+  const radius = 210;
+  const startAngle = Math.PI * 0.78;
+  const endAngle = Math.PI * 2.22;
+  const sweep = endAngle - startAngle;
+
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  context.fillStyle = '#111827';
+  context.font = '700 28px Arial';
+  context.textAlign = 'center';
+  context.fillText(title, centerX, 70);
+
+  context.lineWidth = 30;
+  context.lineCap = 'butt';
+
+  const bands = [
+    { from: 0, to: 25, color: '#dc2626' },
+    { from: 25, to: 50, color: '#f97316' },
+    { from: 50, to: 75, color: '#f59e0b' },
+    { from: 75, to: 90, color: '#84cc16' },
+    { from: 90, to: 100, color: '#16a34a' },
+  ];
+
+  context.strokeStyle = '#cbd5e1';
+  context.lineWidth = 42;
+  context.beginPath();
+  context.arc(centerX, centerY, radius + 10, startAngle, endAngle);
+  context.stroke();
+
+  for (const band of bands) {
+    const bandStart = startAngle + (band.from / 100) * sweep;
+    const bandEnd = startAngle + (band.to / 100) * sweep;
+    context.strokeStyle = band.color;
+    context.lineWidth = 28;
+    context.beginPath();
+    context.arc(centerX, centerY, radius, bandStart, bandEnd);
+    context.stroke();
+  }
+
+  const ticks = [0, 25, 50, 75, 100];
+  context.strokeStyle = '#111827';
+  context.lineWidth = 3;
+  for (const tick of ticks) {
+    const angle = startAngle + (tick / 100) * sweep;
+    const inner = radius - 26;
+    const outer = radius + 18;
+    context.beginPath();
+    context.moveTo(centerX + Math.cos(angle) * inner, centerY + Math.sin(angle) * inner);
+    context.lineTo(centerX + Math.cos(angle) * outer, centerY + Math.sin(angle) * outer);
+    context.stroke();
+  }
+
+  const clampedScore = Math.max(0, Math.min(100, score));
+  const needleAngle = startAngle + (clampedScore / 100) * sweep;
+  context.strokeStyle = '#fb6f4a';
+  context.lineWidth = 18;
+  context.lineCap = 'round';
+  context.beginPath();
+  context.moveTo(centerX - Math.cos(needleAngle) * 40, centerY - Math.sin(needleAngle) * 40);
+  context.lineTo(centerX + Math.cos(needleAngle) * (radius - 25), centerY + Math.sin(needleAngle) * (radius - 25));
+  context.stroke();
+
+  context.fillStyle = '#0f766e';
+  context.beginPath();
+  context.arc(centerX, centerY, 26, 0, Math.PI * 2);
+  context.fill();
+  context.strokeStyle = '#111827';
+  context.lineWidth = 2;
+  context.stroke();
+
+  context.fillStyle = '#111827';
+  context.font = '700 40px Arial';
+  context.fillText(String(score), centerX, 505);
+
+  context.font = '700 20px Arial';
+  context.fillStyle = '#dc2626';
+  context.fillText('Poor', 260, 440);
+  context.fillStyle = '#ef4444';
+  context.fillText('Fair', 240, 250);
+  context.fillStyle = '#f97316';
+  context.fillText('Good', centerX, 125);
+  context.fillStyle = '#65a30d';
+  context.fillText('Great', 665, 250);
+  context.fillStyle = '#16a34a';
+  context.fillText('Excellent', 685, 440);
+
+  context.fillStyle = '#334155';
+  context.font = '14px Arial';
+  context.fillText('Google PageSpeed Insights performance score.', centerX, 570);
+
+  return canvas.toDataURL('image/png');
+}
+
 export async function downloadAuditWorkbook(audit: DemoAudit): Promise<void> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Shopify CRO Audit MVP';
@@ -503,11 +629,15 @@ export async function downloadAuditWorkbook(audit: DemoAudit): Promise<void> {
   const assessmentRange = `Audit!$D$2:$D$${lastAuditRow}`;
   const priorityRange = `Audit!$J$2:$J$${lastAuditRow}`;
   const overallFormula = scoreFormula(lastAuditRow);
+  const mobilePerformance = audit.performanceResults.find((result) => result.strategy === 'mobile');
+  const desktopPerformance = audit.performanceResults.find((result) => result.strategy === 'desktop');
   const summaryRows: Array<[string, string | number | Date | { formula: string; result: string | number }]> = [
     ['Store URL', audit.storeUrl],
     ['Scan Date', new Date(audit.updatedAt)],
     ['Audit Score', { formula: overallFormula, result: audit.overallScore }],
     ['Overall Performance Score', { formula: overallFormula, result: audit.performanceScore }],
+    ['Mobile PageSpeed Score', mobilePerformance?.performanceScore ?? 'Not available'],
+    ['Desktop PageSpeed Score', desktopPerformance?.performanceScore ?? 'Not available'],
     ['Total High Priority Findings', { formula: `COUNTIF(${priorityRange},"High")`, result: audit.items.filter((item) => item.priorityLabel === 'High').length }],
     ['Total Medium Priority Findings', { formula: `COUNTIF(${priorityRange},"Medium")`, result: audit.items.filter((item) => item.priorityLabel === 'Medium').length }],
     ['Total Low Priority Findings', { formula: `COUNTIF(${priorityRange},"Low")`, result: audit.items.filter((item) => item.priorityLabel === 'Low').length }],
@@ -545,8 +675,145 @@ export async function downloadAuditWorkbook(audit: DemoAudit): Promise<void> {
 
   summarySheet.autoFilter = {
     from: 'A1',
-    to: 'B12',
+    to: `B${summaryRows.length + 1}`,
   };
+
+  const performanceSheet = workbook.addWorksheet('Performance', {
+    views: [{ state: 'frozen', ySplit: 1 }],
+  });
+
+  performanceSheet.columns = [
+    { key: 'url', width: 42 },
+    { key: 'strategy', width: 14 },
+    { key: 'performanceScore', width: 18 },
+    { key: 'accessibilityScore', width: 18 },
+    { key: 'bestPracticesScore', width: 20 },
+    { key: 'seoScore', width: 14 },
+    { key: 'firstContentfulPaint', width: 20 },
+    { key: 'largestContentfulPaint', width: 22 },
+    { key: 'totalBlockingTime', width: 22 },
+    { key: 'cumulativeLayoutShift', width: 24 },
+    { key: 'speedIndex', width: 18 },
+    { key: 'errorMessage', width: 42 },
+  ];
+
+  performanceSheet.addRow([
+    'URL',
+    'Device',
+    'Performance Score',
+    'Accessibility Score',
+    'Best Practices Score',
+    'SEO Score',
+    'FCP',
+    'LCP',
+    'TBT',
+    'CLS',
+    'Speed Index',
+    'Error',
+  ]);
+  setHeaderRow(performanceSheet.getRow(1));
+
+  if (audit.performanceResults.length > 0) {
+    audit.performanceResults.forEach((result) => {
+      const row = performanceSheet.addRow([
+        result.url,
+        result.strategy,
+        result.performanceScore ?? '',
+        result.accessibilityScore ?? '',
+        result.bestPracticesScore ?? '',
+        result.seoScore ?? '',
+        result.firstContentfulPaint,
+        result.largestContentfulPaint,
+        result.totalBlockingTime,
+        result.cumulativeLayoutShift,
+        result.speedIndex,
+        result.errorMessage ?? '',
+      ]);
+
+      row.eachCell((cell, columnNumber) => {
+        cell.alignment = {
+          vertical: 'top',
+          horizontal: columnNumber >= 2 && columnNumber <= 6 ? 'center' : 'left',
+          wrapText: true,
+        };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'E5E7EB' } },
+          left: { style: 'thin', color: { argb: 'E5E7EB' } },
+          bottom: { style: 'thin', color: { argb: 'E5E7EB' } },
+          right: { style: 'thin', color: { argb: 'E5E7EB' } },
+        };
+
+        if (columnNumber >= 3 && columnNumber <= 6) {
+          cell.numFmt = '0';
+        }
+      });
+    });
+  } else {
+    performanceSheet.addRow(['No PageSpeed results collected yet.']);
+  }
+
+  performanceSheet.autoFilter = {
+    from: 'A1',
+    to: `L${Math.max(performanceSheet.rowCount, 1)}`,
+  };
+
+  const speedScoreSheet = workbook.addWorksheet('Speed Score');
+  speedScoreSheet.columns = [
+    { key: 'a', width: 14 },
+    { key: 'b', width: 14 },
+    { key: 'c', width: 14 },
+    { key: 'd', width: 14 },
+    { key: 'e', width: 14 },
+    { key: 'f', width: 14 },
+    { key: 'g', width: 14 },
+    { key: 'h', width: 14 },
+  ];
+
+  const pageSpeedScore = averagePageSpeedScore(audit);
+  const gaugeResults = audit.performanceResults.filter((result) => typeof result.performanceScore === 'number');
+  speedScoreSheet.getCell('A1').value = 'Mobile and desktop PageSpeed scores are shown separately. Average is listed below.';
+
+  if (gaugeResults.length > 0) {
+    gaugeResults.forEach((result, index) => {
+      const score = result.performanceScore;
+
+      if (score === null) {
+        return;
+      }
+
+      const gaugeImage = drawSpeedGaugeDataUrl(score, `${result.strategy === 'mobile' ? 'Mobile' : 'Desktop'} PageSpeed Score`);
+
+      if (gaugeImage) {
+        const imageId = workbook.addImage({
+          base64: gaugeImage,
+          extension: 'png',
+        });
+        speedScoreSheet.addImage(imageId, {
+          tl: { col: 0.8, row: 1.2 + index * 25 },
+          ext: { width: 760, height: 520 },
+        });
+      }
+
+      const rowNumber = 31 + index * 25;
+      speedScoreSheet.getCell(`B${rowNumber}`).value = result.strategy === 'mobile' ? 'Mobile score' : 'Desktop score';
+      speedScoreSheet.getCell(`C${rowNumber}`).value = score;
+      speedScoreSheet.getCell(`D${rowNumber}`).value = scoreLabel(score);
+      speedScoreSheet.getCell(`B${rowNumber}`).font = { bold: true };
+      speedScoreSheet.getCell(`C${rowNumber}`).font = { bold: true, size: 16 };
+      speedScoreSheet.getCell(`D${rowNumber}`).font = { bold: true, size: 16 };
+    });
+
+    const averageRow = 31 + gaugeResults.length * 25;
+    speedScoreSheet.getCell(`B${averageRow}`).value = 'Average score';
+    speedScoreSheet.getCell(`C${averageRow}`).value = pageSpeedScore ?? 'Not available';
+    speedScoreSheet.getCell(`D${averageRow}`).value = pageSpeedScore === null ? '' : scoreLabel(pageSpeedScore);
+    speedScoreSheet.getCell(`B${averageRow}`).font = { bold: true };
+    speedScoreSheet.getCell(`C${averageRow}`).font = { bold: true, size: 16 };
+    speedScoreSheet.getCell(`D${averageRow}`).font = { bold: true, size: 16 };
+  } else {
+    speedScoreSheet.getCell('B4').value = 'No PageSpeed score available yet.';
+    speedScoreSheet.getCell('B4').font = { bold: true, size: 16, color: { argb: '991B1B' } };
+  }
 
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], {

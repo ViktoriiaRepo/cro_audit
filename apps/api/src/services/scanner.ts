@@ -1,5 +1,6 @@
 import { chromium, request } from 'playwright';
 import type { AuditItem, AuditPage, AuditScanResult, DetectedPage, PageType, ScanProgress } from '../types.js';
+import { fetchPageSpeedResults } from './pagespeed.js';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -781,6 +782,24 @@ export async function scanStorefront(inputUrl: string, onProgress?: ScanProgress
     checksCompleted: 0,
   });
 
+  reportProgress(onProgress, {
+    stage: 'pagespeed',
+    message: 'Running mobile and desktop PageSpeed',
+    currentUrl: url,
+    pagesScanned: pages.length,
+    checksCompleted: 0,
+  });
+
+  const performanceResults = await fetchPageSpeedResults(url);
+  const mobilePerformance = performanceResults.find((result) => result.strategy === 'mobile');
+  const desktopPerformance = performanceResults.find((result) => result.strategy === 'desktop');
+  const availablePerformanceScores = performanceResults
+    .map((result) => result.performanceScore)
+    .filter((score): score is number => typeof score === 'number');
+  const averagePerformanceScore = availablePerformanceScores.length > 0
+    ? Math.round(availablePerformanceScores.reduce((sum, score) => sum + score, 0) / availablePerformanceScores.length)
+    : null;
+
   const findings: Partial<AuditItem>[] = [
     buildItem(
       'shopify-detected',
@@ -1026,10 +1045,14 @@ export async function scanStorefront(inputUrl: string, onProgress?: ScanProgress
     ),
     buildItem(
       'pagespeed-score',
-      'irrelevant',
+      averagePerformanceScore === null ? 'irrelevant' : averagePerformanceScore >= 70 ? 'good' : averagePerformanceScore >= 50 ? 'can_be_improved' : 'bad',
       url,
-      'PageSpeed is optional and not included in the first slice.',
-      'The PageSpeed API can be added later without changing the checklist model.',
+      averagePerformanceScore === null
+        ? 'PageSpeed data was not available for this scan.'
+        : `Mobile PageSpeed: ${mobilePerformance?.performanceScore ?? 'n/a'}; desktop PageSpeed: ${desktopPerformance?.performanceScore ?? 'n/a'}.`,
+      averagePerformanceScore === null
+        ? performanceResults.map((result) => result.errorMessage).filter(Boolean).join(' ') || 'PageSpeed Insights did not return usable metrics.'
+        : `Average homepage PageSpeed score is ${averagePerformanceScore}. Review the Performance sheet for LCP, CLS, FCP, Speed Index, and TBT.`,
     ),
   );
 
@@ -1045,6 +1068,7 @@ export async function scanStorefront(inputUrl: string, onProgress?: ScanProgress
     isShopify,
     detectedPages: discovery.detectedPages,
     pages,
+    performanceResults,
     findings,
   };
 }

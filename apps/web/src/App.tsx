@@ -131,6 +131,22 @@ function SummaryCard({ label, value, hint }: { label: string; value: string; hin
   );
 }
 
+function performanceTone(score: number | null) {
+  if (score === null) return 'text-slate-500';
+  if (score >= 90) return 'text-emerald-700';
+  if (score >= 50) return 'text-amber-700';
+  return 'text-rose-700';
+}
+
+function performanceLabel(score: number | null) {
+  if (score === null) return 'Not available';
+  if (score >= 90) return 'Excellent';
+  if (score >= 75) return 'Great';
+  if (score >= 50) return 'Good';
+  if (score >= 25) return 'Fair';
+  return 'Poor';
+}
+
 export default function App() {
   const [audit, setAudit] = useState<DemoAudit | null>(null);
   const [storeUrl, setStoreUrl] = useState('https://example.com');
@@ -226,6 +242,8 @@ export default function App() {
 
   const scanProgressMessage = audit?.scanProgress?.message ?? 'Starting scan';
   const scanProgressDetail = audit?.scanProgress?.currentUrl ?? storeUrl;
+  const mobilePerformance = audit?.performanceResults.find((result) => result.strategy === 'mobile');
+  const desktopPerformance = audit?.performanceResults.find((result) => result.strategy === 'desktop');
 
   async function handleScan() {
     setError('');
@@ -393,7 +411,8 @@ export default function App() {
                       <div className="mt-1 break-all text-xs text-amber-800">{scanProgressDetail}</div>
                       {audit.scanProgress ? (
                         <div className="mt-1 text-xs text-amber-800">
-                          Pages scanned: {audit.scanProgress.pagesScanned} · Checks completed: {audit.scanProgress.checksCompleted}
+                          Pages scanned: {audit.scanProgress.pagesScanned}
+                          {audit.scanProgress.checksCompleted > 0 ? ` - Checks completed: ${audit.scanProgress.checksCompleted}` : ''}
                         </div>
                       ) : null}
                     </div>
@@ -402,6 +421,52 @@ export default function App() {
               ) : null}
 
               {error ? <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
+            </section>
+
+            <section className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-soft backdrop-blur-sm">
+              <h2 className="text-lg font-semibold text-slate-950">PageSpeed</h2>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                {[mobilePerformance, desktopPerformance].map((result, index) => {
+                  const label = result?.strategy ?? (index === 0 ? 'mobile' : 'desktop');
+
+                  return (
+                    <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-semibold capitalize text-slate-900">{label}</div>
+                        <div className="text-right">
+                          <div className={`text-2xl font-semibold ${performanceTone(result?.performanceScore ?? null)}`}>
+                            {result?.performanceScore ?? '--'}
+                          </div>
+                          <div className={`text-xs font-semibold ${performanceTone(result?.performanceScore ?? null)}`}>
+                            {performanceLabel(result?.performanceScore ?? null)}
+                          </div>
+                        </div>
+                      </div>
+                      {result ? (
+                        result.errorMessage ? (
+                          <div className="mt-3 text-sm text-rose-700">{result.errorMessage}</div>
+                        ) : (
+                          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
+                            <div>LCP: <span className="font-medium text-slate-900">{result.largestContentfulPaint || '--'}</span></div>
+                            <div>CLS: <span className="font-medium text-slate-900">{result.cumulativeLayoutShift || '--'}</span></div>
+                            <div>FCP: <span className="font-medium text-slate-900">{result.firstContentfulPaint || '--'}</span></div>
+                            <div>TBT: <span className="font-medium text-slate-900">{result.totalBlockingTime || '--'}</span></div>
+                          </div>
+                        )
+                      ) : (
+                        <div className="mt-3 text-sm text-slate-500">Run a scan to collect PageSpeed metrics.</div>
+                      )}
+                      {result?.finalScreenshot ? (
+                        <img
+                          src={result.finalScreenshot}
+                          alt={`${label} PageSpeed screenshot`}
+                          className="mt-3 max-h-48 w-full rounded-xl border border-slate-200 bg-white object-contain"
+                        />
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
             </section>
 
             <section className="rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-soft backdrop-blur-sm">
@@ -506,3 +571,4 @@ export default function App() {
     </div>
   );
 }
+
