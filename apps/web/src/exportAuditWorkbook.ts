@@ -15,6 +15,8 @@ const impactLabels: Record<Impact, string> = {
 };
 
 const priorityLabels: PriorityLabel[] = ['High', 'Medium', 'Low'];
+const uncheckedValue = '☐';
+const checkedValue = '☑';
 const categoryOrder = [
   'General',
   'Header',
@@ -90,7 +92,7 @@ function fileSafeValue(value: string) {
 }
 
 function setHeaderRow(row: ExcelJS.Row) {
-  row.height = 22;
+  row.height = 38;
   row.eachCell((cell) => {
     cell.fill = {
       type: 'pattern',
@@ -308,7 +310,7 @@ function applyDoneConditionalFormatting(sheet: ExcelJS.Worksheet, endRow: number
       {
         type: 'expression',
         priority: 12,
-        formulae: ['$A2=TRUE'],
+        formulae: [`OR($A2=TRUE,$A2="${checkedValue}")`],
         style: {
           fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'D1FAE5' }, fgColor: { argb: 'D1FAE5' } },
           font: { color: { argb: '065F46' }, strike: true },
@@ -358,7 +360,7 @@ function priorityLabelFormula(row: number) {
 }
 
 function visiblePriorityFormula(row: number) {
-  return `IF(A${row}=TRUE,"Done",N${row})`;
+  return `IF(OR(A${row}=TRUE,A${row}="${checkedValue}"),"Done",N${row})`;
 }
 
 function itemPriorityValue(item: DemoAuditItem) {
@@ -377,7 +379,7 @@ export async function downloadAuditWorkbook(audit: DemoAudit): Promise<void> {
   });
 
   auditSheet.columns = [
-    { key: 'done', width: 8 },
+    { key: 'done', width: 11 },
     { key: 'number', width: 6 },
     { key: 'item', width: 34 },
     { key: 'assessment', width: 18 },
@@ -411,6 +413,7 @@ export async function downloadAuditWorkbook(audit: DemoAudit): Promise<void> {
   ]);
 
   setHeaderRow(auditSheet.getRow(1));
+  auditSheet.getCell('A1').note = 'For clickable Google Sheets checkboxes, select the Done cells and use Insert > Checkbox. Checked TRUE values will mark rows as Done.';
 
   for (const [category, categoryItems] of groupAuditItems(audit.items)) {
     applyCategoryRow(auditSheet.addRow([]), category);
@@ -420,7 +423,7 @@ export async function downloadAuditWorkbook(audit: DemoAudit): Promise<void> {
       const assessmentLabel = assessmentLabels[item.assessment];
       const priorityLabel = itemPriorityValue(item);
       const row = auditSheet.addRow([
-        false,
+        uncheckedValue,
         item.itemNumber,
         item.itemLabel,
         assessmentLabel,
@@ -458,13 +461,14 @@ export async function downloadAuditWorkbook(audit: DemoAudit): Promise<void> {
         };
       });
 
+      applyDropdownValidation(row.getCell(1), [uncheckedValue, checkedValue]);
       applyDropdownValidation(row.getCell(4), Object.values(assessmentLabels));
       applyCellStyle(row.getCell(4), assessmentStyles[assessmentLabel] ?? assessmentStyles.Irrelevant!);
       applyCellStyle(row.getCell(10), priorityStyles[priorityLabel] ?? priorityStyles.Medium!);
       applyCellStyle(row.getCell(14), priorityStyles[item.priorityLabel] ?? priorityStyles.Medium!);
 
       row.getCell(1).font = { color: { argb: '64748B' }, bold: true };
-      row.getCell(1).numFmt = 'BOOLEAN';
+      row.getCell(1).alignment = { vertical: 'middle', horizontal: 'center' };
       row.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'E5E7EB' } };
       row.getCell(11).numFmt = '0.0';
       row.getCell(12).numFmt = '0.0';
@@ -507,7 +511,7 @@ export async function downloadAuditWorkbook(audit: DemoAudit): Promise<void> {
     ['Total High Priority Findings', { formula: `COUNTIF(${priorityRange},"High")`, result: audit.items.filter((item) => item.priorityLabel === 'High').length }],
     ['Total Medium Priority Findings', { formula: `COUNTIF(${priorityRange},"Medium")`, result: audit.items.filter((item) => item.priorityLabel === 'Medium').length }],
     ['Total Low Priority Findings', { formula: `COUNTIF(${priorityRange},"Low")`, result: audit.items.filter((item) => item.priorityLabel === 'Low').length }],
-    ['Total Done', { formula: `COUNTIF(${doneRange},TRUE)`, result: 0 }],
+    ['Total Done', { formula: `COUNTIF(${doneRange},TRUE)+COUNTIF(${doneRange},"${checkedValue}")`, result: 0 }],
     ['Total Good', { formula: `COUNTIF(${assessmentRange},"Good")`, result: audit.items.filter((item) => item.assessment === 'good').length }],
     ['Total Can Be Improved', { formula: `COUNTIF(${assessmentRange},"Can be improved")`, result: audit.items.filter((item) => item.assessment === 'can_be_improved').length }],
     ['Total Bad', { formula: `COUNTIF(${assessmentRange},"Bad")`, result: audit.items.filter((item) => item.assessment === 'bad').length }],

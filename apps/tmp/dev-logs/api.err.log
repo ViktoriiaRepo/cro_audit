@@ -22,3 +22,10 @@ Emitted 'error' event on Server instance at:
 }
 
 Node.js v24.16.0
+npm error Lifecycle script `dev` failed with error:
+npm error code 1073807364
+npm error path C:\Projects\cro_audit\apps\api
+npm error workspace @cro-audit/api
+npm error location C:\Projects\cro_audit\apps\api
+npm error command failed
+npm error command C:\WINDOWS\system32\cmd.exe /d /s /c tsx watch src/index.ts

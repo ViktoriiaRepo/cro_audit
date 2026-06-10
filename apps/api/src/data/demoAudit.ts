@@ -36,6 +36,7 @@ export function createDemoAudit(storeUrl = 'https://example.com'): DemoAudit {
     domain,
     isShopify: false,
     scanStatus: 'idle',
+    scanProgress: null,
     overallScore: baselineItems.overallScore,
     performanceScore: baselineItems.performanceScore,
     detectedPages: [],

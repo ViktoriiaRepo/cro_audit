@@ -1,5 +1,5 @@
 import { chromium, request } from 'playwright';
-import type { AuditItem, AuditPage, AuditScanResult, DetectedPage, PageType } from '../types.js';
+import type { AuditItem, AuditPage, AuditScanResult, DetectedPage, PageType, ScanProgress } from '../types.js';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +16,15 @@ type DetectionState = {
 const pageGotoTimeoutMs = 12000;
 const networkIdleTimeoutMs = 2500;
 const maxCrawledPages = 10;
+
+type ScanProgressReporter = (progress: Omit<ScanProgress, 'updatedAt'>) => void;
+
+function reportProgress(
+  onProgress: ScanProgressReporter | undefined,
+  progress: Omit<ScanProgress, 'updatedAt'>,
+) {
+  onProgress?.(progress);
+}
 
 function normalizeUrl(inputUrl: string): string {
   const candidate = inputUrl.startsWith('http://') || inputUrl.startsWith('https://') ? inputUrl : `https://${inputUrl}`;
@@ -294,7 +303,15 @@ function toAbsoluteUrls(baseUrl: string, links: string[]): string[] {
   );
 }
 
-async function inspectPage(url: string, pageType: PageType, source = 'crawl') {
+async function inspectPage(url: string, pageType: PageType, source = 'crawl', onProgress?: ScanProgressReporter, pagesScanned = 0) {
+  reportProgress(onProgress, {
+    stage: `scan-${pageType}`,
+    message: `Scanning ${pageType} page`,
+    currentUrl: url,
+    pagesScanned,
+    checksCompleted: 0,
+  });
+
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1600 } });
 
@@ -510,7 +527,12 @@ async function runInteractionCheck(baseUrl: string, check: InteractionCheck): Pr
   }
 }
 
-async function collectSitemapUrls(requestContext: Awaited<ReturnType<typeof request.newContext>>, baseUrl: string, sitemapSeeds: string[]): Promise<string[]> {
+async function collectSitemapUrls(
+  requestContext: Awaited<ReturnType<typeof request.newContext>>,
+  baseUrl: string,
+  sitemapSeeds: string[],
+  onProgress?: ScanProgressReporter,
+): Promise<string[]> {
   const discoveredUrls = new Set<string>();
   const sitemapQueue = unique(sitemapSeeds.map((seed) => normalizeDiscoveredUrl(baseUrl, seed)).filter((value): value is string => Boolean(value)));
   const processed = new Set<string>();
@@ -521,6 +543,14 @@ async function collectSitemapUrls(requestContext: Awaited<ReturnType<typeof requ
     if (!sitemapUrl || processed.has(sitemapUrl)) {
       continue;
     }
+
+    reportProgress(onProgress, {
+      stage: 'discover-sitemap',
+      message: 'Reading sitemap URLs',
+      currentUrl: sitemapUrl,
+      pagesScanned: 0,
+      checksCompleted: 0,
+    });
 
     processed.add(sitemapUrl);
 
@@ -596,7 +626,7 @@ function pickRepresentativeUrls(grouped: Partial<Record<PageType, string[]>>): s
   return unique(selected);
 }
 
-async function discoverSitePages(inputUrl: string): Promise<CrawlSummary> {
+async function discoverSitePages(inputUrl: string, onProgress?: ScanProgressReporter): Promise<CrawlSummary> {
   const homepageUrl = normalizeUrl(inputUrl);
   const base = new URL(homepageUrl);
   const requestContext = await request.newContext();
@@ -646,7 +676,7 @@ async function discoverSitePages(inputUrl: string): Promise<CrawlSummary> {
   };
 
   try {
-    const homepageSnapshot = await inspectPage(homepageUrl, 'homepage', 'homepage');
+    const homepageSnapshot = await inspectPage(homepageUrl, 'homepage', 'homepage', onProgress, pages.length);
     seen.add(homepageUrl);
     recordPage(homepageUrl, 'homepage', homepageSnapshot);
 
@@ -666,7 +696,7 @@ async function discoverSitePages(inputUrl: string): Promise<CrawlSummary> {
       new URL('/sitemap_index.xml', base).toString(),
     ]);
 
-    const sitemapUrls = await collectSitemapUrls(requestContext, homepageUrl, sitemapSeeds);
+    const sitemapUrls = await collectSitemapUrls(requestContext, homepageUrl, sitemapSeeds, onProgress);
     const sitemapGrouped = groupUrlsByType(sitemapUrls);
 
     for (const url of pickRepresentativeUrls(sitemapGrouped)) {
@@ -687,7 +717,7 @@ async function discoverSitePages(inputUrl: string): Promise<CrawlSummary> {
 
       seen.add(current.url);
       const pageType = classifyPageType(current.url);
-      const snapshot = await inspectPage(current.url, pageType, current.source);
+      const snapshot = await inspectPage(current.url, pageType, current.source, onProgress, pages.length);
       recordPage(current.url, current.source, snapshot);
 
       if (current.depth >= 2) {
@@ -718,10 +748,18 @@ async function discoverSitePages(inputUrl: string): Promise<CrawlSummary> {
   }
 }
 
-export async function scanStorefront(inputUrl: string): Promise<AuditScanResult> {
+export async function scanStorefront(inputUrl: string, onProgress?: ScanProgressReporter): Promise<AuditScanResult> {
   const url = normalizeUrl(inputUrl);
-  const homepageSnapshot = await inspectPage(url, 'homepage', 'homepage');
-  const discovery = await discoverSitePages(url);
+  reportProgress(onProgress, {
+    stage: 'start',
+    message: 'Starting scan',
+    currentUrl: url,
+    pagesScanned: 0,
+    checksCompleted: 0,
+  });
+
+  const homepageSnapshot = await inspectPage(url, 'homepage', 'homepage', onProgress, 0);
+  const discovery = await discoverSitePages(url, onProgress);
   const isShopify = detectShopify(`${homepageSnapshot.html} ${homepageSnapshot.page.title} ${homepageSnapshot.page.metaDescription}`);
 
   const collectionFallback = discovery.pageUrlsByType.collection?.[0] ?? '';
@@ -735,6 +773,14 @@ export async function scanStorefront(inputUrl: string): Promise<AuditScanResult>
   const policyUrls = (discovery.policyUrls.length > 0 ? discovery.policyUrls : policyFallback).slice(0, 4);
 
   const pages: AuditPage[] = [...discovery.pages];
+  reportProgress(onProgress, {
+    stage: 'build-findings',
+    message: 'Building homepage findings',
+    currentUrl: url,
+    pagesScanned: pages.length,
+    checksCompleted: 0,
+  });
+
   const findings: Partial<AuditItem>[] = [
     buildItem(
       'shopify-detected',
@@ -799,6 +845,14 @@ export async function scanStorefront(inputUrl: string): Promise<AuditScanResult>
   const productSnapshot = productUrl ? discovery.snapshotsByUrl[productUrl] : undefined;
 
   if (productUrl && productSnapshot) {
+    reportProgress(onProgress, {
+      stage: 'product-checks',
+      message: 'Checking product page signals',
+      currentUrl: productUrl,
+      pagesScanned: pages.length,
+      checksCompleted: findings.length,
+    });
+
     const productHtml = `${productSnapshot.page.title} ${productSnapshot.page.metaDescription} ${productSnapshot.page.h1Text}`;
     findings.push(
       buildItem(
@@ -909,7 +963,7 @@ export async function scanStorefront(inputUrl: string): Promise<AuditScanResult>
     },
   ];
 
-  const interactionResults = await runInteractionChecks(url, interactionChecks);
+  const interactionResults = await runInteractionChecks(url, interactionChecks, onProgress, pages.length);
 
   for (const result of interactionResults) {
     findings.push({
@@ -979,6 +1033,14 @@ export async function scanStorefront(inputUrl: string): Promise<AuditScanResult>
     ),
   );
 
+  reportProgress(onProgress, {
+    stage: 'complete',
+    message: 'Finalizing audit scores',
+    currentUrl: url,
+    pagesScanned: pages.length,
+    checksCompleted: findings.length,
+  });
+
   return {
     isShopify,
     detectedPages: discovery.detectedPages,
@@ -987,7 +1049,12 @@ export async function scanStorefront(inputUrl: string): Promise<AuditScanResult>
   };
 }
 
-async function runInteractionChecks(baseUrl: string, checks: InteractionCheck[]): Promise<Array<InteractionOutcome & { itemKey: string }>> {
+async function runInteractionChecks(
+  baseUrl: string,
+  checks: InteractionCheck[],
+  onProgress?: ScanProgressReporter,
+  pagesScanned = 0,
+): Promise<Array<InteractionOutcome & { itemKey: string }>> {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1600 } });
   const screenshotDir = await ensureScreenshotDir();
@@ -995,6 +1062,14 @@ async function runInteractionChecks(baseUrl: string, checks: InteractionCheck[])
 
   try {
     for (const check of checks) {
+      reportProgress(onProgress, {
+        stage: 'interaction-checks',
+        message: `Checking ${check.label}`,
+        currentUrl: baseUrl,
+        pagesScanned,
+        checksCompleted: results.length,
+      });
+
       await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: pageGotoTimeoutMs });
       await page.waitForLoadState('networkidle', { timeout: networkIdleTimeoutMs }).catch(() => undefined);
 

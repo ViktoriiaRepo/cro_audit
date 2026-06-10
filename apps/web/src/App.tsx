@@ -5,7 +5,6 @@ import { downloadAuditWorkbook } from './exportAuditWorkbook';
 
 const assessmentOptions: Assessment[] = ['good', 'can_be_improved', 'bad', 'irrelevant'];
 const impactOptions: Impact[] = ['high', 'medium', 'low'];
-const scanStages = ['Discovering pages', 'Running interaction checks', 'Calculating scores'];
 const categoryOrder = [
   'General',
   'Header',
@@ -69,7 +68,7 @@ function EditableRow({
         <select
           value={item.impact}
           onChange={(event) => onChange({ impact: event.target.value as Impact })}
-          className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"
+          className="w-24 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
         >
           {impactOptions.map((option) => (
             <option key={option} value={option}>
@@ -139,7 +138,6 @@ export default function App() {
   const [isScanning, setIsScanning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
-  const [scanStageIndex, setScanStageIndex] = useState(0);
   const [scanElapsedSeconds, setScanElapsedSeconds] = useState(0);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -161,7 +159,6 @@ export default function App() {
 
   useEffect(() => {
     if (!isScanning) {
-      setScanStageIndex(0);
       setScanElapsedSeconds(0);
       return;
     }
@@ -170,13 +167,30 @@ export default function App() {
       setScanElapsedSeconds((value) => value + 1);
     }, 1000);
 
-    const stageTimer = window.setInterval(() => {
-      setScanStageIndex((value) => Math.min(value + 1, scanStages.length - 1));
-    }, 5000);
-
     return () => {
       window.clearInterval(elapsedTimer);
-      window.clearInterval(stageTimer);
+    };
+  }, [isScanning]);
+
+  useEffect(() => {
+    if (!isScanning) {
+      return;
+    }
+
+    const progressTimer = window.setInterval(() => {
+      getDemoAudit()
+        .then((data) => {
+          setAudit(data);
+
+          if (data.scanStatus === 'ready' || data.scanStatus === 'failed') {
+            setIsScanning(false);
+          }
+        })
+        .catch(() => undefined);
+    }, 1500);
+
+    return () => {
+      window.clearInterval(progressTimer);
     };
   }, [isScanning]);
 
@@ -210,10 +224,12 @@ export default function App() {
     return [...ordered, ...extra];
   }, [audit]);
 
+  const scanProgressMessage = audit?.scanProgress?.message ?? 'Starting scan';
+  const scanProgressDetail = audit?.scanProgress?.currentUrl ?? storeUrl;
+
   async function handleScan() {
     setError('');
     setIsScanning(true);
-    setScanStageIndex(0);
     setScanElapsedSeconds(0);
     scanAbortControllerRef.current?.abort();
     const scanAbortController = new AbortController();
@@ -330,7 +346,7 @@ export default function App() {
                   disabled={isLoadingAudit || isScanning || isExporting || isClearing}
                   className="inline-flex w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isScanning ? `Scanning... ${scanStages[scanStageIndex]} (${scanElapsedSeconds}s)` : isLoadingAudit ? 'Loading...' : 'Run scan'}
+                  {isScanning ? `${scanProgressMessage} (${scanElapsedSeconds}s)` : isLoadingAudit ? 'Loading...' : 'Run scan'}
                 </button>
 
                 <button
@@ -372,8 +388,14 @@ export default function App() {
                   </div>
                   {isScanning ? (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                      Current stage: <span className="font-semibold">{scanStages[scanStageIndex]}</span>
+                      Current stage: <span className="font-semibold">{scanProgressMessage}</span>
                       <span className="ml-2 text-amber-700">({scanElapsedSeconds}s elapsed)</span>
+                      <div className="mt-1 break-all text-xs text-amber-800">{scanProgressDetail}</div>
+                      {audit.scanProgress ? (
+                        <div className="mt-1 text-xs text-amber-800">
+                          Pages scanned: {audit.scanProgress.pagesScanned} · Checks completed: {audit.scanProgress.checksCompleted}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -437,13 +459,13 @@ export default function App() {
                   </div>
 
                   <div className="overflow-x-auto">
-                    <table className="min-w-[1700px] w-full border-collapse">
+                    <table className="min-w-[1780px] w-full border-collapse">
                       <thead className="bg-slate-100/95 text-left text-xs uppercase tracking-[0.15em] text-slate-500">
                         <tr>
                           <th className="px-3 py-3">#</th>
                           <th className="px-3 py-3">Item</th>
                           <th className="px-3 py-3">Assessment</th>
-                          <th className="px-3 py-3">Impact</th>
+                          <th className="min-w-28 px-3 py-3">Impact</th>
                           <th className="px-3 py-3">Page / URL</th>
                           <th className="px-3 py-3">Findings & recommendations</th>
                           <th className="px-3 py-3">Notes</th>

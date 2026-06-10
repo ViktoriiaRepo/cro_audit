@@ -46,12 +46,22 @@ export interface DemoAuditItem {
   errorMessage?: string;
 }
 
+export interface ScanProgress {
+  stage: string;
+  message: string;
+  currentUrl?: string;
+  pagesScanned: number;
+  checksCompleted: number;
+  updatedAt: string;
+}
+
 export interface DemoAudit {
   id: string;
   storeUrl: string;
   domain: string;
   isShopify: boolean;
   scanStatus: 'idle' | 'scanning' | 'ready' | 'failed';
+  scanProgress: ScanProgress | null;
   overallScore: number;
   performanceScore: number;
   detectedPages: DetectedPage[];

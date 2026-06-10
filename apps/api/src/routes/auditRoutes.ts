@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { getDemoAudit, resetDemoAudit, updateDemoAuditFromScan, updateDemoAuditItems } from '../store/demoAuditStore.js';
+import { getDemoAudit, resetDemoAudit, updateDemoAuditFromScan, updateDemoAuditItems, updateScanProgress } from '../store/demoAuditStore.js';
 import { scanStorefront } from '../services/scanner.js';
 import { scoreAuditSummary } from '../services/scoring.js';
 
@@ -40,9 +40,17 @@ auditRouter.post('/scan', async (req, res) => {
       storeUrl: parsed.data.url,
       domain: new URL(parsed.data.url.startsWith('http') ? parsed.data.url : `https://${parsed.data.url}`).hostname,
       scanStatus: 'scanning',
+      scanProgress: {
+        stage: 'queued',
+        message: 'Preparing scanner',
+        currentUrl: parsed.data.url,
+        pagesScanned: 0,
+        checksCompleted: 0,
+        updatedAt: new Date().toISOString(),
+      },
     });
 
-    const scan = await scanStorefront(parsed.data.url);
+    const scan = await scanStorefront(parsed.data.url, updateScanProgress);
     const currentAudit = getDemoAudit();
     const findingsByKey = new Map(scan.findings.map((finding) => [finding.itemKey, finding]));
 
@@ -74,6 +82,14 @@ auditRouter.post('/scan', async (req, res) => {
       domain: new URL(parsed.data.url.startsWith('http') ? parsed.data.url : `https://${parsed.data.url}`).hostname,
       isShopify: scan.isShopify,
       scanStatus: 'ready',
+      scanProgress: {
+        stage: 'complete',
+        message: 'Scan complete',
+        currentUrl: parsed.data.url,
+        pagesScanned: scan.pages.length,
+        checksCompleted: scan.findings.length,
+        updatedAt: new Date().toISOString(),
+      },
       detectedPages: scan.detectedPages,
       pages: scan.pages,
       items: summary.items,
@@ -83,7 +99,17 @@ auditRouter.post('/scan', async (req, res) => {
 
     res.json(updatedAudit);
   } catch (error) {
-    updateDemoAuditFromScan({ scanStatus: 'failed' });
+    updateDemoAuditFromScan({
+      scanStatus: 'failed',
+      scanProgress: {
+        stage: 'failed',
+        message: 'Scan failed',
+        currentUrl: parsed.data.url,
+        pagesScanned: getDemoAudit().pages.length,
+        checksCompleted: 0,
+        updatedAt: new Date().toISOString(),
+      },
+    });
     const message = error instanceof Error ? error.message : 'Scan failed.';
     res.status(500).json({ error: message });
   }
